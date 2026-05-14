@@ -2,7 +2,6 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/colors';
-import GlidoLogo from '@/components/GlidoLogo';
 
 const features = [
   { icon: 'flash', text: 'Fast Pickup' },

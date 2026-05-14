@@ -20,7 +20,7 @@ export default function PhoneScreen() {
 
         <Text style={styles.heading}>Enter your{'\n'}Phone Number</Text>
         <Text style={styles.subtitle}>
-          We'll send a verification code via SMS
+          We will send a verification code via SMS
         </Text>
 
         <View style={styles.inputContainer}>
