@@ -1,12 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Animated, TextInput, Dimensions
+  Animated, TextInput, Dimensions, FlatList, ActivityIndicator,
+  Keyboard, Platform, BackHandler,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { Colors } from '@/constants/colors';
+import { searchPlaces, PlaceSuggestion } from '@/services/placesSearch';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height } = Dimensions.get('window');
 
@@ -16,20 +20,70 @@ const recentPlaces = [
 ];
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [fromText, setFromText] = useState('Current Location');
   const [toText, setToText] = useState('');
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [searching, setSearching] = useState(false);
   const drawerAnim = useRef(new Animated.Value(height)).current;
+  const keyboardAnim = useRef(new Animated.Value(0)).current;
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
       const loc = await Location.getCurrentPositionAsync({});
+      const geocode = await Location.reverseGeocodeAsync(loc.coords);
+      if (geocode.length > 0) {
+        const { district, city, street, name } = geocode[0];
+        const label = district && city
+          ? `${district}, ${city}`
+          : street
+          ? `${name ? name + ' ' : ''}${street}`
+          : 'Current Location';
+        setFromText(label);
+      }
       setLocation(loc);
     })();
   }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      Animated.timing(keyboardAnim, {
+        toValue: -e.endCoordinates.height,
+        duration: e.duration ?? 250,
+        useNativeDriver: true,
+      }).start();
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, (e) => {
+      Animated.timing(keyboardAnim, {
+        toValue: 0,
+        duration: e.duration ?? 250,
+        useNativeDriver: true,
+      }).start();
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [keyboardAnim]);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeDrawer();
+      return true;
+    });
+    return () => sub.remove();
+  }, [drawerOpen]);
 
   const openDrawer = () => {
     setDrawerOpen(true);
@@ -48,10 +102,35 @@ export default function HomeScreen() {
     }).start(() => setDrawerOpen(false));
   };
 
+  const handleToTextChange = (text: string) => {
+    setToText(text);
+    setSuggestions([]);
+
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+
+    if (text.trim().length < 2) {
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+    debounceTimer.current = setTimeout(async () => {
+      const results = await searchPlaces(text);
+      setSuggestions(results);
+      setSearching(false);
+    }, 500);
+  };
+
+  const selectSuggestion = (place: PlaceSuggestion) => {
+    setToText(place.name);
+    setSuggestions([]);
+  };
+
   const swapLocations = () => {
     const temp = fromText;
     setFromText(toText || 'Current Location');
     setToText(temp);
+    setSuggestions([]);
   };
 
   const region = location
@@ -90,7 +169,7 @@ export default function HomeScreen() {
       </MapView>
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { top: insets.top + 10 }]}>
         <View>
           <Text style={styles.greeting}>Hi, Username! 👋</Text>
           <Text style={styles.subGreeting}>Where are you going today?</Text>
@@ -101,7 +180,7 @@ export default function HomeScreen() {
       </View>
 
       {/* Bottom Card */}
-      <View style={styles.bottomCard}>
+      <View style={[styles.bottomCard, { paddingBottom: insets.bottom + 16 }]}>
 
         {/* Where to go bar */}
         <TouchableOpacity style={styles.searchBar} onPress={openDrawer} activeOpacity={0.8}>
@@ -134,11 +213,16 @@ export default function HomeScreen() {
       )}
 
       {/* Bottom Drawer */}
-      <Animated.View style={[styles.drawer, { transform: [{ translateY: drawerAnim }] }]}>
+      <Animated.View style={[styles.drawer, { paddingBottom: insets.bottom + 16, transform: [{ translateY: Animated.add(drawerAnim, keyboardAnim) }] }]}>
 
         <View style={styles.dragHandle} />
 
-        <Text style={styles.drawerTitle}>Set Location</Text>
+        <View style={styles.drawerHeader}>
+          <Text style={styles.drawerTitle}>Set Location</Text>
+          <TouchableOpacity onPress={closeDrawer} style={styles.closeBtn} hitSlop={8}>
+            <Ionicons name="close" size={20} color={Colors.textDark} />
+          </TouchableOpacity>
+        </View>
 
         {/* From */}
         <View style={styles.locationRow}>
@@ -168,20 +252,44 @@ export default function HomeScreen() {
             <TextInput
               style={styles.locationText}
               value={toText}
-              onChangeText={setToText}
+              onChangeText={handleToTextChange}
               placeholder="Enter destination"
               placeholderTextColor={Colors.textGray}
               autoFocus
             />
           </View>
+          {searching && <ActivityIndicator size="small" color={Colors.primary} />}
         </View>
+
+        {/* Suggestions */}
+        {suggestions.length > 0 && (
+          <FlatList
+            data={suggestions}
+            keyExtractor={(item) => item.id}
+            keyboardShouldPersistTaps="handled"
+            style={styles.suggestionsList}
+            renderItem={({ item }) => (
+              <TouchableOpacity style={styles.suggestionItem} onPress={() => selectSuggestion(item)}>
+                <Ionicons name="location-outline" size={16} color={Colors.primary} style={{ marginTop: 2 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.suggestionName} numberOfLines={1}>{item.name}</Text>
+                  <Text style={styles.suggestionAddress} numberOfLines={1}>{item.address}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            ItemSeparatorComponent={() => <View style={styles.suggestionDivider} />}
+          />
+        )}
 
         {/* Confirm Button */}
         <TouchableOpacity
           style={[styles.confirmBtn, !toText && styles.confirmBtnDisabled]}
           disabled={!toText}
           activeOpacity={0.85}
-          onPress={closeDrawer}
+          onPress={() => {
+            closeDrawer();
+            router.push({ pathname: '/ride-options' as any, params: { from: fromText, to: toText } });
+          }}
         >
           <Text style={styles.confirmBtnText}>Confirm Location</Text>
           <Ionicons name="arrow-forward" size={20} color={Colors.white} />
@@ -198,7 +306,7 @@ const styles = StyleSheet.create({
   map: { flex: 1 },
   header: {
     position: 'absolute',
-    top: 52,
+    top: 10,
     left: 20,
     right: 20,
     flexDirection: 'row',
@@ -227,7 +335,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 32,
+    paddingBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.08,
@@ -284,7 +392,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     paddingHorizontal: 24,
     paddingTop: 14,
-    paddingBottom: 40,
+    paddingBottom: 16,
     gap: 14,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
@@ -343,4 +451,35 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   confirmBtnText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
+  suggestionsList: {
+    maxHeight: 220,
+    backgroundColor: Colors.white,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.secondary,
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  suggestionName: { fontSize: 14, fontWeight: '600', color: Colors.textDark },
+  suggestionAddress: { fontSize: 12, color: Colors.textGray, marginTop: 1 },
+  suggestionDivider: { height: 1, backgroundColor: Colors.secondary, marginHorizontal: 14 },
+  drawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: Colors.secondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 });
