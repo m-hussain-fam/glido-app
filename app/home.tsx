@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import { Colors } from '@/constants/colors';
 import { searchPlaces, PlaceSuggestion } from '@/services/placesSearch';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRideStore } from '@/store/rideStore';
 
 const { height } = Dimensions.get('window');
 
@@ -21,6 +22,7 @@ const recentPlaces = [
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const { setFrom, setTo } = useRideStore();
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [fromText, setFromText] = useState('Current Location');
@@ -37,6 +39,7 @@ export default function HomeScreen() {
       if (status !== 'granted') return;
       const loc = await Location.getCurrentPositionAsync({});
       const geocode = await Location.reverseGeocodeAsync(loc.coords);
+      const coords = { lat: loc.coords.latitude, lon: loc.coords.longitude };
       if (geocode.length > 0) {
         const { district, city, street, name } = geocode[0];
         const label = district && city
@@ -45,6 +48,9 @@ export default function HomeScreen() {
           ? `${name ? name + ' ' : ''}${street}`
           : 'Current Location';
         setFromText(label);
+        setFrom(label, coords);
+      } else {
+        setFrom('Current Location', coords);
       }
       setLocation(loc);
     })();
@@ -123,6 +129,7 @@ export default function HomeScreen() {
 
   const selectSuggestion = (place: PlaceSuggestion) => {
     setToText(place.name);
+    setTo(place.name, { lat: place.lat, lon: place.lon });
     setSuggestions([]);
   };
 
@@ -288,7 +295,7 @@ export default function HomeScreen() {
           activeOpacity={0.85}
           onPress={() => {
             closeDrawer();
-            router.push({ pathname: '/ride-options' as any, params: { from: fromText, to: toText } });
+            router.push('/ride-options' as any);
           }}
         >
           <Text style={styles.confirmBtnText}>Confirm Location</Text>

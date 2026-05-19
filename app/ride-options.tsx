@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRideStore } from '@/store/rideStore';
 
 const RIDE_OPTIONS = [
   {
@@ -40,7 +41,7 @@ const RIDE_OPTIONS = [
 
 export default function RideOptionsScreen() {
   const insets = useSafeAreaInsets();
-  const { from, to } = useLocalSearchParams<{ from: string; to: string }>();
+  const { from, to, setVehicle } = useRideStore();
   const [selected, setSelected] = useState('car');
 
   const selectedOption = RIDE_OPTIONS.find((v) => v.id === selected)!;
@@ -133,7 +134,14 @@ export default function RideOptionsScreen() {
           <Text style={styles.fareLabel}>Total Fare</Text>
           <Text style={styles.totalFare}>Rs. {selectedOption.fare}</Text>
         </View>
-        <TouchableOpacity style={styles.bookBtn} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={styles.bookBtn}
+          activeOpacity={0.85}
+          onPress={() => {
+            setVehicle(selectedOption.id, selectedOption.emoji, selectedOption.fare);
+            router.push('/booking' as any);
+          }}
+        >
           <Text style={styles.bookBtnText}>Book {selectedOption.name}</Text>
           <Ionicons name="arrow-forward" size={20} color={Colors.white} />
         </TouchableOpacity>
